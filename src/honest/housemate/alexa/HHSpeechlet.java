@@ -9,6 +9,11 @@
  */
 package honest.housemate.alexa;
 
+import honest.housemate.alexa.model.GetUserResponse;
+import honest.housemate.alexa.model.User;
+import honest.housemate.alexa.network.HHRequests;
+import honest.housemate.alexa.model.ListTodosResponse;
+import honest.housemate.alexa.model.ListUsersResponse;
 
 import com.amazon.speech.slu.Intent;
 import com.amazon.speech.speechlet.IntentRequest;
@@ -24,6 +29,8 @@ import com.amazon.speech.ui.SimpleCard;
 import com.amazon.speech.ui.OutputSpeech;
 
 public class HHSpeechlet implements SpeechletV2 {
+
+    HHRequests requests = new HHRequests();
 
     @Override
     public void onSessionStarted(SpeechletRequestEnvelope<SessionStartedRequest> requestEnvelope) {
@@ -43,26 +50,33 @@ public class HHSpeechlet implements SpeechletV2 {
         IntentRequest request = requestEnvelope.getRequest();
         System.out.println("onIntent requestId=" + requestEnvelope.getRequest().getRequestId() + ", " +
                 "sessionId=" + requestEnvelope.getSession().getSessionId());
-
+        String accessToken = requestEnvelope.getSession().getUser().getAccessToken();
         Intent intent = request.getIntent();
         String intentName = (intent != null) ? intent.getName() : null;
 
-        if ("CreateTodo".equals(intentName)) {
-            return getCreateTodoResponse();
-        } else if ("ListTodos".equals(intentName)) {
-            return getListTodosResponse();
-        } else if ("ListResidents".equals(intentName)) {
-            return getListResidentsResponse();
-        } else if ("GetAssignee".equals(intentName)) {
-            return getAssigneeResponse();
-        } else if ("AMAZON.HelpIntent".equals(intentName)) {
+        if ("AMAZON.HelpIntent".equals(intentName)) {
             return getHelpResponse();
         } else if ("AMAZON.StopIntent".equals(intentName)) {
             return SpeechletResponse.newTellResponse(getPlainTextOutputSpeech("Ok"));
         } else if ("AMAZON.CancelIntent".equals(intentName)) {
             return SpeechletResponse.newTellResponse(getPlainTextOutputSpeech("Ok"));
+        }
+
+        // Get user
+        GetUserResponse userResponse = requests.getUser(accessToken);
+        if (userResponse.code != 200) {
+            return SpeechletResponse.newTellResponse(getPlainTextOutputSpeech("Network error occurred. Please try again"));
+        }
+        if ("CreateTodo".equals(intentName)) {
+            return getCreateTodoResponse();
+        } else if ("ListTodos".equals(intentName)) {
+            return getListTodosResponse(accessToken, userResponse.response.getDefaultHouse());
+        } else if ("ListResidents".equals(intentName)) {
+            return getListResidentsResponse(accessToken, userResponse.response.getDefaultHouse());
+        } else if ("GetAssignee".equals(intentName)) {
+            return getAssigneeResponse(accessToken, userResponse.response.getDefaultHouse());
         } else {
-            return getAskResponse("HelloWorld", "This is unsupported.  Please try something else.");
+            return getAskResponse("Honest Housemate", "This is unsupported.  Please try something else.");
         }
     }
 
@@ -104,8 +118,24 @@ public class HHSpeechlet implements SpeechletV2 {
      *
      * @return SpeechletResponse spoken and visual response for the given intent
      */
-    private SpeechletResponse getListTodosResponse() {
-        String speechText = "List to-dos";
+    private SpeechletResponse getListTodosResponse(String accessToken, String uniqueName) {
+        ListTodosResponse todosResponse = requests.listTodos(accessToken, uniqueName);
+        if (todosResponse.code != 200) {
+            return SpeechletResponse.newTellResponse(getPlainTextOutputSpeech("Network error occurred. Please try again"));
+        }
+        String speechText = "";
+        if (todosResponse.todos.size() == 0) {
+            speechText += "There are currently no to-dos for your house";
+        } else {
+            speechText += "Here's a list of house to-dos ";
+            int numToSay = 5;
+            if (todosResponse.todos.size() < numToSay) {
+                numToSay = todosResponse.todos.size();
+            }
+            for (int i = 0; i < numToSay; i++) {
+                speechText += todosResponse.todos.get(i).getTitle() + ",  ";
+            }
+        }
 
         // Create the Simple card content.
         SimpleCard card = getSimpleCard("Honest Housemate", speechText);
@@ -121,8 +151,20 @@ public class HHSpeechlet implements SpeechletV2 {
      *
      * @return SpeechletResponse spoken and visual response for the given intent
      */
-    private SpeechletResponse getListResidentsResponse() {
-        String speechText = "List residents";
+    private SpeechletResponse getListResidentsResponse(String accessToken, String uniqueName) {
+        ListUsersResponse usersResponse = requests.listResidents(accessToken, uniqueName);
+        if (usersResponse.code != 200) {
+            return SpeechletResponse.newTellResponse(getPlainTextOutputSpeech("Network error occurred. Please try again"));
+        }
+        String speechText = "";
+        if (usersResponse.users.size() == 0) {
+            speechText += "There are currently no users in your house";
+        } else {
+            speechText += "Here's a list of residents ";
+            for (int i = 0; i < usersResponse.users.size(); i++) {
+                speechText += usersResponse.users.get(i).getFullName() + ",  ";
+            }
+        }
 
         // Create the Simple card content.
         SimpleCard card = getSimpleCard("Honest Housemate", speechText);
@@ -138,8 +180,17 @@ public class HHSpeechlet implements SpeechletV2 {
      *
      * @return SpeechletResponse spoken and visual response for the given intent
      */
-    private SpeechletResponse getAssigneeResponse() {
-        String speechText = "Get assignee";
+    private SpeechletResponse getAssigneeResponse(String accessToken, String uniqueName) {
+        ListUsersResponse usersResponse = requests.getAssignee(accessToken, uniqueName);
+        if (usersResponse.code != 200) {
+            return SpeechletResponse.newTellResponse(getPlainTextOutputSpeech("Network error occurred. Please try again"));
+        }
+        String speechText = "";
+        if (usersResponse.users.size() == 0) {
+            speechText += "There are currently no users in your house";
+        } else {
+            speechText = usersResponse.users.get(0).getFullName() + " has been slacking off the most";
+        }
 
         // Create the Simple card content.
         SimpleCard card = getSimpleCard("Honest Housemate", speechText);
